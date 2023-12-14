@@ -2,7 +2,6 @@ from .type import Type
 from typing_extensions import override
 
 class TypeInteger(Type):
-    _zero = TypeInteger(0)
     def __init__(self, con):
         super().__init__(self._int)
         self._con = con
@@ -13,7 +12,7 @@ class TypeInteger(Type):
 
     @override
     def _print(self, s):
-        return s.append(self._con)
+        return s + f"{self._con}"
 
     @override
     def is_constant(self):
@@ -33,3 +32,5 @@ class TypeInteger(Type):
     @override
     def __repr__(self) -> str:
         return self._print("")
+
+ZERO = TypeInteger(0)

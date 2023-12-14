@@ -5,6 +5,8 @@ class GraphVisualizer:
        The dot output must be saved to a file and run manually via dot to generate the SVG output.
        Currently, this is done manually.
     """
+    def __init__(self) -> None:
+        super().__init__()
 
     def generate_dot_output(self, parser) -> str:
         # graph may have cycles, get all nodes in graph first.

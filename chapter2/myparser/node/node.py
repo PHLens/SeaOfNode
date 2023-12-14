@@ -1,18 +1,16 @@
 from abc import abstractmethod
 from typing_extensions import override
-from .constant_node import ConstantNode
-from myparser.type import Type
+from myparser.type import Type, BOTTOM
 
-_unique_id = 1
 class Node():
+    _unique_id = 1
+    _disablePeephole = False
     def __init__(self, *args): # node can have zero or multi inputs.
-        global _unique_id
-        self._nid = _unique_id + 1
-        _unique_id += 1
+        self._nid = Node._unique_id + 1
+        Node._unique_id += 1
         self._inputs = list(args[1:]) # exclude self.
         self._outputs = []
-        self._type = Type()
-        self._disablePeephole = False
+        self._type = None
 
         for _input in self._inputs:
             if _input is not None:
@@ -33,10 +31,10 @@ class Node():
         if self.is_dead():
             return f"{self.unique_name():DEAD}"
         else:
-            return self._print1()
+            return self._print1("")
 
     @abstractmethod
-    def _print1(self):
+    def _print1(self, s:str):
         pass
 
     def In(self, i: int):
@@ -56,7 +54,8 @@ class Node():
 
     def peephole(self):
         type_ = self._type = self.compute()
-        if self._disablePeephole:
+        print(type_)
+        if Node._disablePeephole:
             return
         if isinstance(self, ConstantNode) and type_.is_constant():
             self.kill()
@@ -102,3 +101,236 @@ class Node():
 
     def __repr__(self):
         return self.print()
+
+class ConstantNode(Node):
+    def __init__(self, type_: Type):
+        from ..parser import Parser
+        super().__init__(self, Parser.START)
+        self._con = type_
+
+    @override
+    def label(self) -> str:
+        return f"#{self._con}"
+
+    @override
+    def unique_name(self):
+        return f"Con_{self._nid}"
+
+    @override
+    def _print1(self, s):
+        return self._con._print(s)
+
+    @override
+    def compute(self):
+        return self._con
+
+    @override
+    def idealize(self):
+        return None
+
+class StartNode(Node):
+    def __init__(self):
+        super().__init__(self)
+
+    @override
+    def label(self) -> str:
+        return "Start"
+
+    @override
+    def _print1(self, s: str):
+        return s + self.label()
+
+    def isCFG(self) -> bool:
+        return True;
+
+    @override
+    def compute(self):
+        return BOTTOM
+
+    @override
+    def idealize(self):
+        return None
+
+class ReturnNode(Node):
+    def __init__(self, *args):
+        super().__init__(self, *args)
+
+    def ctrl(self) -> Node:
+        return self.In(0)
+
+    def expr(self) -> Node:
+        return self.In(1)
+
+    @override
+    def label(self) -> str:
+        return "Return"
+
+    @override
+    def _print1(self, s: str):
+        return self.expr()._print0(s + "return ") + ";"
+
+    def isCFG(self) -> bool:
+        return True;
+
+    @override
+    def compute(self):
+        return BOTTOM
+
+    @override
+    def idealize(self):
+        return None
+
+class AddNode(Node):
+    def __init__(self, lhs, rhs):
+        super().__init__(None, lhs, rhs)
+
+    @override
+    def label(self) -> str:
+        return "Add"
+
+    @override
+    def glabel(self):
+        return "+"
+
+    @override
+    def _print1(self, s:str) -> str:
+        s = self.In(1)._print0(s+"(")
+        s = self.In(2)._print0(s+"+")
+        return s+")"
+
+    @override
+    def compute(self) -> Type:
+        i0 = self.In(1)._type
+        i1 = self.In(2)._type
+        if isinstance(i0, TypeInteger) and isinstance(i1, TypeInteger):
+            if i0.is_constant() and i1.is_constant():
+                return TypeInteger.constant(i0.value() + i1.value())
+        return BOTTOM
+
+    @override
+    def idealize(self):
+        # TODO: add of 0.
+        return None;
+
+class SubNode(Node):
+    def __init__(self, lhs, rhs):
+        super().__init__(None, lhs, rhs)
+
+    @override
+    def label(self) -> str:
+        return "sub"
+
+    @override
+    def glabel(self):
+        return "-"
+
+    @override
+    def _print1(self, s: str):
+        self.In(1)._print0(s + "(")
+        self.In(2)._print0(s + "-")
+        s += ")"
+        return s
+
+    @override
+    def compute(self) -> Type:
+        i0 = self.In(1)._type
+        i1 = self.In(2)._type
+        if isinstance(i0, TypeInteger) and isinstance(i1, TypeInteger):
+            if i0.is_constant() and i1.is_constant():
+                return TypeInteger.constant(i0.value() - i1.value())
+        return BOTTOM
+
+    @override
+    def idealize(self):
+        return None;
+
+class MinusNode(Node):
+    def __init__(self, input_):
+        super().__init__(None, input_)
+
+    @override
+    def label(self) -> str:
+        return "Minus"
+
+    @override
+    def glabel(self):
+        return "-"
+
+    @override
+    def _print1(self, s:str) -> str:
+        s = self.In(1)._print0(s+"(-")
+        return s+")"
+
+    @override
+    def compute(self) -> Type:
+        i0 = self.In(1)._type
+        if isinstance(i0, TypeInteger):
+            return TypeInteger.constant(-i0.value()) if i0.is_constant() else i0
+        return BOTTOM
+
+    @override
+    def idealize(self):
+        return None;
+
+class MulNode(Node):
+    def __init__(self, lhs, rhs):
+        super().__init__(None, lhs, rhs)
+
+    @override
+    def label(self) -> str:
+        return "Mul"
+
+    @override
+    def glabel(self):
+        return "*"
+
+    @override
+    def _print1(self, s:str) -> str:
+        s = self.In(1)._print0(s+"(")
+        s = self.In(2)._print0(s+"*")
+        return s+")"
+
+    @override
+    def compute(self) -> Type:
+        print(self._inputs)
+        i0 = self.In(1)._type
+        i1 = self.In(2)._type
+        if isinstance(i0, TypeInteger) and isinstance(i1, TypeInteger):
+            if i0.is_constant() and i1.is_constant():
+                return TypeInteger.constant(i0.value() * i1.value())
+        return BOTTOM
+
+    @override
+    def idealize(self):
+        return None;
+
+class DivNode(Node):
+    def __init__(self, lhs, rhs):
+        super().__init__(None, lhs, rhs)
+
+    @override
+    def label(self) -> str:
+        return "Div"
+
+    @override
+    def glabel(self):
+        return "//"
+
+    @override
+    def _print1(self, s:str) -> str:
+        s = self.In(1)._print0(s+"(")
+        s = self.In(2)._print0(s+"/")
+        return s+")"
+
+    @override
+    def compute(self) -> Type:
+        i0 = self.In(1)._type
+        i1 = self.In(2)._type
+        if isinstance(i0, TypeInteger) and isinstance(i1, TypeInteger):
+            if i0.is_constant() and i1.is_constant():
+                return TypeInteger.constant(i0.value() / i1.value()) if i1.value() != 0 else ZERO
+        return BOTTOM
+
+    @override
+    def idealize(self):
+        return None;

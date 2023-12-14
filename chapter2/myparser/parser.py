@@ -1,12 +1,13 @@
 from .node import *
+from .type import *
 
 class Parser():
     # class variable for static use.
-    start = None
+    START = None
     def __init__(self, source: str):
-        self.start = StartNode()
         self._lexer = self.Lexer(source)
         Node.reset()
+        Parser.START = StartNode()
 
     def src(self) -> str:
         return str(self._lexer._input)
@@ -15,21 +16,59 @@ class Parser():
         self.require("return")
         return self.parseReturn()
 
+    """
+        'return' expr ;
+    """
     def parseReturn(self) -> ReturnNode:
         expr = self.require(";", self.parseExpression())
-        return ReturnNode(self.start, expr)
+        return ReturnNode(Parser.START, expr).peephole()
 
+    """
+        expr : additiveExpr
+    """
     def parseExpression(self):
+        return self.parseAddition()
+
+    """
+        additiveExpr : multiplicativeExpr (('+' | '-') multiplicativeExpr)*
+    """
+    def parseAddition(self):
+        lhs = self.parseMultiplication()
+        if self.match("+"): return AddNode(lhs, self.parseAddition()).peephole()
+        if self.match("-"): return SubNode(lhs, self.parseAddition()).peephole()
+        return lhs
+
+    """
+        multiplicativeExpr : unaryExpr (('*' | '/') unaryExpr)*
+    """
+    def parseMultiplication(self):
+        lhs = self.parseUnary()
+        if self.match("*"): return MulNode(lhs, self.parseMultiplication()).peephole()
+        if self.match("/"): return DivNode(lhs, self.parseMultiplication()).peephole()
+        return lhs
+
+    """
+        unaryExpr : ('-') unaryExpr | primaryExpr
+    """
+    def parseUnary(self):
+        if self.match("-"): return MinusNode(self.parseUnary()).peephole()
         return self.parsePrimary()
 
+    """
+        primaryExpr : integerLiteral | Identifier | '(' expression ')'
+    """
     def parsePrimary(self):
-        self._lexer.skipWhiteSpace()
+        #self._lexer.skipWhiteSpace()
         if self._lexer.isNumber():
             return self.parseIntegerLiteral()
-        raise self.error("Syntax error, expected integer literal")
+        if self.match("("): return self.require(")", self.parseExpression())
+        raise self.errorSyntax("integer literal")
 
+    """
+        integerLiteral: [1-9][0-9]* | [0]
+    """
     def parseIntegerLiteral(self) -> ConstantNode:
-        return ConstantNode(self._lexer.parseNumber(), self.start)
+        return ConstantNode(self._lexer.parseNumber()).peephole()
 
     def match(self, syntax: str):
         return self._lexer.match(syntax)
@@ -95,7 +134,7 @@ class Parser():
                 return self.isNumber(ch=self.peek())
             return ch.isdigit()
 
-        def parseNumber(self):
+        def parseNumber(self) -> Type:
             start = self._position
             ch = self.nextChar()
             while self.isNumber(ch):
@@ -105,7 +144,7 @@ class Parser():
             if len(snum) > 1 and snum[0] == '0':
                 raise Parser.error("Syntax error: integer values cannot start with '0'")
 
-            return int(snum)
+            return TypeInteger.constant(int(snum))
 
         def isIdStart(self, ch: str):
             return ch.isalpha() or ch == '_'
@@ -128,3 +167,6 @@ class Parser():
         def parsePunctuation(self):
             start = self._position
             return self._input[start:start + 1]
+
+        def __repr__(self) -> str:
+            return self._input[self._position:len(self._input) - self._position]
