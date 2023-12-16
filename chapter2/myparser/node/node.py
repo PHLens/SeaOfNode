@@ -1,14 +1,14 @@
 from abc import abstractmethod
 from typing_extensions import override
-from myparser.type import Type, BOTTOM
+from myparser.type import Type, TypeInteger, BOTTOM
 
 class Node():
     _unique_id = 1
     _disablePeephole = False
     def __init__(self, *args): # node can have zero or multi inputs.
-        self._nid = Node._unique_id + 1
+        self._nid = Node._unique_id
         Node._unique_id += 1
-        self._inputs = list(args[1:]) # exclude self.
+        self._inputs = list(args)
         self._outputs = []
         self._type = None
 
@@ -25,13 +25,13 @@ class Node():
         return self.label()
 
     def print(self):
-        return self._print0()
+        return self._print0("")
 
-    def _print0(self):
+    def _print0(self, s:str):
         if self.is_dead():
             return f"{self.unique_name():DEAD}"
         else:
-            return self._print1("")
+            return self._print1(s)
 
     @abstractmethod
     def _print1(self, s:str):
@@ -43,23 +43,29 @@ class Node():
     def nIns(self) -> int:
         return len(self._inputs)
 
+    def out(self, i: int):
+        return self._outputs[i]
+
     def nOuts(self) -> int:
         return len(self._outputs)
 
     def isUnused(self) -> bool:
-        return len(self._outputs) == 0
+        return self.nOuts() == 0
 
     def isCFG(self) -> bool:
         return False
 
     def peephole(self):
         type_ = self._type = self.compute()
-        print(type_)
         if Node._disablePeephole:
-            return
-        if isinstance(self, ConstantNode) and type_.is_constant():
+            return self
+        if not isinstance(self, ConstantNode) and type_.is_constant():
             self.kill()
             return ConstantNode(type_).peephole()
+        n = self.idealize()
+        if n is not None:
+            return n
+        return self
 
     def set_def(self, idx: int, new_def):
         old_def = self.In(idx)
@@ -105,7 +111,7 @@ class Node():
 class ConstantNode(Node):
     def __init__(self, type_: Type):
         from ..parser import Parser
-        super().__init__(self, Parser.START)
+        super().__init__(Parser.START)
         self._con = type_
 
     @override
@@ -130,7 +136,7 @@ class ConstantNode(Node):
 
 class StartNode(Node):
     def __init__(self):
-        super().__init__(self)
+        super().__init__()
 
     @override
     def label(self) -> str:
@@ -152,8 +158,8 @@ class StartNode(Node):
         return None
 
 class ReturnNode(Node):
-    def __init__(self, *args):
-        super().__init__(self, *args)
+    def __init__(self, ctrl, data):
+        super().__init__(ctrl, data)
 
     def ctrl(self) -> Node:
         return self.In(0)
@@ -292,7 +298,6 @@ class MulNode(Node):
 
     @override
     def compute(self) -> Type:
-        print(self._inputs)
         i0 = self.In(1)._type
         i1 = self.In(2)._type
         if isinstance(i0, TypeInteger) and isinstance(i1, TypeInteger):
@@ -328,7 +333,7 @@ class DivNode(Node):
         i1 = self.In(2)._type
         if isinstance(i0, TypeInteger) and isinstance(i1, TypeInteger):
             if i0.is_constant() and i1.is_constant():
-                return TypeInteger.constant(i0.value() / i1.value()) if i1.value() != 0 else ZERO
+                return TypeInteger.constant(i0.value() // i1.value()) if i1.value() != 0 else ZERO
         return BOTTOM
 
     @override

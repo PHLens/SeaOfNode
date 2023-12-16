@@ -40,3 +40,7 @@ def testinfo(pre_message="\nTest case:", post_message="Test Time:"):
         return wrapper
     return loader
 
+def graph_to_png(dot_file):
+    import pydot
+    graphs = pydot.graph_from_dot_file(dot_file)
+    graphs[0].write_png("graph.png")
