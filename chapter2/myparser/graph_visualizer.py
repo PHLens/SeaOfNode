@@ -17,7 +17,7 @@ class GraphVisualizer:
         s += parser.src()
         s += "\n*/\n"
 
-        s += "\trandir=BT;\n"
+        s += "\trankdir=BT;\n"
         s += "\tordering=\"in\";\n"
         s += "\tconcentrate=\"true\";\n"
 

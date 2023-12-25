@@ -157,7 +157,7 @@ class Parser():
             ch = self.nextChar()
             while self.isIdLetter(ch):
                 ch = self.nextChar()
-            parsed_id = self._input[start:self._position]
+            parsed_id = self._input[start:self._position - 1]
             self._position -= 1
             return parsed_id
 

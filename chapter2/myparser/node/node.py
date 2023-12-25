@@ -1,6 +1,6 @@
 from abc import abstractmethod
 from typing_extensions import override
-from myparser.type import Type, TypeInteger, BOTTOM
+from myparser.type import Type, TypeInteger, BOTTOM, ZERO
 
 class Node():
     _unique_id = 1
@@ -338,4 +338,4 @@ class DivNode(Node):
 
     @override
     def idealize(self):
-        return None;
+        return None
