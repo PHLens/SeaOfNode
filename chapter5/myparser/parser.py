@@ -95,7 +95,10 @@ class Parser():
         """
             Dumps out the node graph
         """
-        print(GraphVisualizer().generate_dot_output(self))
+        with open("graph.dot", 'w') as f:
+            f.write(GraphVisualizer().generate_dot_output(self))
+        import os
+        os.system("dot -Tpng graph.dot -o graph.png")
         return None
 
     def parseExpressionStatement(self):

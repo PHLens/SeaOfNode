@@ -1,4 +1,4 @@
-from .node import ConstantNode, StartNode, ScopeNode
+from .node import ConstantNode, StartNode, ScopeNode, ProjNode, MultiNode
 class GraphVisualizer:
     """Simple visualizer that outputs GraphViz dot format.
        The dot output must be saved to a file and run manually via dot to generate the SVG output.
@@ -44,13 +44,37 @@ class GraphVisualizer:
     def nodes(self, s, all):
         s += "\tsubgraph cluster_Nodes {\n"
         for node in all:
-            if isinstance(node, ScopeNode):
-                continue
+            if isinstance(node, ProjNode) or isinstance(node, ScopeNode):
+                continue  # Do not emit, rolled into MultiNode or Scope cluster already
             s += f"\t\t{node.unique_name()} [ "
             lab = node.glabel()
-            if node.isCFG():
-                s += "shape=box style=filled fillcolor=yellow "
-            s += f"lable=\"{lab}\""
+            if isinstance(node, MultiNode):
+                # Make a box with the MultiNode on top, and all the projections on the bottom
+                s += "shape=plaintext label=<\n"
+                s += "\t\t\t<TABLE BORDER=\"0\" CELLBORDER=\"1\" CELLSPACING=\"0\" CELLPADDING=\"4\">\n"
+                s += f"\t\t\t<TR><TD BGCOLOR=\"yellow\">{lab}</TD></TR>\n"
+                s += "\t\t\t<TR>"
+                doProjTable = False
+                for use in node._outputs:
+                    if isinstance(use, ProjNode):
+                        if not doProjTable:
+                            doProjTable = True
+                            s += "<TD>\n"
+                            s += "\t\t\t\t<TABLE BORDER=\"0\" CELLBORDER=\"1\" CELLSPACING=\"0\">\n"
+                            s += "\t\t\t\t<TR>"
+                        s += f"<TD PORT=\"p{use._idx}\""
+                        if use.isCFG(): s+= " BGCOLOR=\"yellow\""
+                        s += f">{use.glabel()}</TD>"
+                if doProjTable:
+                    s += "</TR>\n"
+                    s += "\t\t\t\t</TABLE>\n"
+                    s += "\t\t\t</TD>"
+                s += "</TR>\n"
+                s += "\t\t\t</TABLE>>\n\t\t"
+            else:
+                if node.isCFG():
+                    s += "shape=box style=filled fillcolor=yellow "
+                s += f"label=\"{lab}\""
             s += "];\n"
         s += "\t}\n"
         return s
@@ -84,11 +108,20 @@ class GraphVisualizer:
     def node_edges(self, s, all):
         s += "\tedge [ fontname=Helvetica, fontsize=8 ];\n"
         for node in all:
+            # Do not display the Constant->Start edge;
+            # ProjNodes handled by Multi;
+            # ScopeNodes are done separately
+            if isinstance(node, ConstantNode) or isinstance(node, ProjNode) or isinstance(node, ScopeNode):
+                continue
             i = 0
             for def_ in node._inputs:
                 if def_ is not None:
                     s += f"\t{node.unique_name()} -> "
-                    s += f"{def_.unique_name()}"
+                    if isinstance(def_, ProjNode):
+                        mname = def_.ctrl().unique_name()
+                        s += f"{mname}:p{def_._idx}"
+                    else:
+                        s += f"{def_.unique_name()}"
                     # number edges
                     s += f"[taillabel={i}"
                     if isinstance(node, ConstantNode) and isinstance(def_, StartNode):
@@ -108,7 +141,13 @@ class GraphVisualizer:
                 def_ = scopenode.In(scope.get(name))
                 if def_ == None:
                     continue
-                s += f"\t{scopename}:\"{self.makePortName(scopename, name)}\" -> {def_.unique_name()};\n"
+                s += f"\t{scopename}:\"{self.makePortName(scopename, name)}\" -> "
+                if isinstance(def_, ProjNode):
+                    mname = def_.ctrl().unique_name()
+                    s += f"{mname}:p{def_._idx}"
+                else:
+                    s += f"{def_.unique_name()}"
+                s += ";\n"
             level += 1
         return s
 

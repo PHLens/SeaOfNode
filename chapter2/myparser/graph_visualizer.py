@@ -35,7 +35,7 @@ class GraphVisualizer:
             lab = node.glabel()
             if node.isCFG():
                 s += "shape=box style=filled fillcolor=yellow "
-            s += f"lable=\"{lab}\""
+            s += f"label=\"{lab}\""
             s += "];\n"
         s += "\t}\n"
         return s
