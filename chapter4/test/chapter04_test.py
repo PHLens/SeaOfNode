@@ -5,10 +5,92 @@ cur_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(cur_dir + "/../")
 from myparser.parser import Parser
 from myparser.graph_visualizer import GraphVisualizer
-from myparser.node import Node, ConstantNode
-from myparser.type import TypeInteger
+from myparser.node import Node, ConstantNode, ProjNode
+from myparser.type import TypeInteger, BOT
 
 class TestParser(unittest.TestCase):
+    def test_chapter4_peephole(self):
+        parser = Parser("return 1+arg+2; #showGraph;")
+        ret = parser.parse()
+        self.assertEqual("return (arg+3);", ret.print())
+
+    def test_chapter4_peephole2(self):
+        parser = Parser("return (1+arg)+2;")
+        ret = parser.parse()
+        self.assertEqual("return (arg+3);", ret.print())
+    
+    def test_chapter4_add0(self):
+        parser = Parser("return 0+arg;")
+        ret = parser.parse()
+        self.assertEqual("return arg;", ret.print())
+    
+    def test_chapter4_add_add_mul(self):
+        parser = Parser("return arg+0+arg;")
+        ret = parser.parse()
+        self.assertEqual("return (arg*2);", ret.print())
+    
+    def test_chapter4_peephole3(self):
+        parser = Parser("return 1+arg+2+arg+3;")
+        ret = parser.parse()
+        self.assertEqual("return ((arg*2)+6);", ret.print())
+    
+    def test_chapter4_mul1(self):
+        parser = Parser("return 1*arg;")
+        ret = parser.parse()
+        self.assertEqual("return arg;", ret.print())
+    
+    def test_chapter4_var_arg(self):
+        parser = Parser("return arg; #showGraph;", BOT)
+        ret = parser.parse()
+        self.assertTrue(isinstance(ret.In(0), ProjNode))
+        self.assertTrue(isinstance(ret.In(1), ProjNode))
+
+    def test_chapter4_constant_arg(self):
+        parser = Parser("return arg;", TypeInteger.constant(2))
+        ret = parser.parse()
+        self.assertEqual("return 2;", ret.print())
+
+    def test_chapter4_comp_eq(self):
+        parser = Parser("return 3==3; #showGraph;")
+        ret = parser.parse()
+        self.assertEqual("return 1;", ret.print())
+
+    def test_chapter4_comp_eq2(self):
+        parser = Parser("return 3==4; #showGraph;")
+        ret = parser.parse()
+        self.assertEqual("return 0;", ret.print())
+    
+    def test_chapter4_comp_neq(self):
+        parser = Parser("return 3!=3; #showGraph;")
+        ret = parser.parse()
+        self.assertEqual("return 0;", ret.print())
+
+    def test_chapter4_comp_neq2(self):
+        parser = Parser("return 3!=4; #showGraph;")
+        ret = parser.parse()
+        self.assertEqual("return 1;", ret.print())
+    
+    def test_chapter4_comp_bug1(self):
+        parser = Parser("int a=arg+1; int b=a; b=1; return a+2; #showGraph;")
+        ret = parser.parse()
+        self.assertEqual("return (arg+3);", ret.print())
+    
+    def test_chapter4_comp_bug2(self):
+        parser = Parser("int a=arg+1; a=a; return a; #showGraph;")
+        ret = parser.parse()
+        self.assertEqual("return (arg+1);", ret.print())
+    
+    def test_chapter4_comp_bug3(self):
+        parser = Parser("inta=1; return a;")
+        msg = "Undefined name 'inta'"
+        with self.assertRaisesRegex(RuntimeError, msg):
+            ret = parser.parse()
+    
+    def test_chapter4_comp_bug4(self):
+        parser = Parser("return -arg;")
+        ret = parser.parse()
+        self.assertEqual("return (-arg);", ret.print())
+
     def test_var_decl(self):
         parser = Parser("int a=1; return a;")
         ret = parser.parse()
@@ -86,7 +168,7 @@ class TestParser(unittest.TestCase):
         ret = parser.parse()
         start = parser.START
 
-        self.assertIs(start, ret.ctrl())
+        self.assertTrue(isinstance(ret.ctrl(), ProjNode))
         expr = ret.expr()
         if isinstance(expr, ConstantNode):
             self.assertIs(start, expr.In(0))

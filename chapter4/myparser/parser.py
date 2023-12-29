@@ -1,35 +1,64 @@
 from .node import *
 from .type import *
 from .graph_visualizer import GraphVisualizer
-from functools import singledispatchmethod
 
 class Parser():
+    """
+        The Parser converts a Simple source program to the Sea of Nodes intermediate
+        representation directly in one pass. There is no intermediate Abstract
+        Syntax Tree structure.
+        
+        This is a simple recursive descent parser. All lexical analysis is done here as well.
+    """
     # class variable for static use.
     START = None
     # List of keywords disallowed as identifiers.
     KEYWORDS = ["int", "return"]
-    def __init__(self, source: str):
-        self._lexer = self.Lexer(source)
+    def __init__(self, source: str, arg=None):
+        if arg is None:
+            arg = BOT
         Node.reset()
+        self._lexer = self.Lexer(source)
         self._scope = ScopeNode()
-        Parser.START = StartNode()
+        Parser.START = StartNode([CONTROL, arg])
+        Parser.START.peephole()
+
+    def __repr__(self):
+        return self._lexer.__repr__()
 
     def src(self) -> str:
         return str(self._lexer._input)
+    
+    def find(self, nid):
+        """
+            Debugging utility to find a Node by index
+        """
+        return Parser.START.find(nid)
+
+    def ctrl(self):
+        return self._scope.ctrl()
+    
+    def ctrln(self, n):
+        return self._scope.ctrln(n)
 
     def parse(self, show=False) -> ReturnNode:
+        # Enter a new scope for the initial control and arguments
+        self._scope.push()
+        self._scope.define(ScopeNode.CTRL, ProjNode(Parser.START, 0, ScopeNode.CTRL).peephole())
+        self._scope.define(ScopeNode.ARG0, ProjNode(Parser.START, 1, ScopeNode.ARG0).peephole())
         ret = self.parseBlock()
+        self._scope.pop()
         if not self._lexer.is_eof():
             self.error(f"Syntax error, unexpected {self._lexer.getAnyNextToken()}")
         if show:
             self.showGraph()
         return ret
 
-    """Block
-        '{' statement '}'
-        Does not parse the opening or closing '{}'
-    """
     def parseBlock(self):
+        """ Block
+            '{' statement '}'
+            Does not parse the opening or closing '{}'
+        """
         # Enter a new scope
         self._scope.push()
         n = None
@@ -41,31 +70,38 @@ class Parser():
         self._scope.pop()
         return n
 
-    """Parses a statement:
-        returnStatement | declStatement | blockStatement | expressionStatement
-    """
     def parseStatement(self):
+        """ Parses a statement:
+            returnStatement | declStatement | blockStatement | expressionStatement
+        """
         if self.matchx("return"): return self.parseReturn()
         elif self.matchx("int"): return self.parseDecl()
         elif self.match("{"): return self.require(self.parseBlock(), "}")
         elif self.matchx("#showGraph"): return self.require(self.showGraph(), ";")
         else: return self.parseExpressionStatement()
 
-    """Parses a return statement; "return" already parsed.
-        'return' expr ;
-    """
     def parseReturn(self) -> ReturnNode:
+        """ Parses a return statement; "return" already parsed.
+            The $ctrl edge is killed
+
+            'return' expr ;
+        """
         expr = self.require(self.parseExpression(), ";")
-        return ReturnNode(Parser.START, expr).peephole()
+        ret = ReturnNode(self.ctrl(), expr).peephole()
+        self.ctrln(None)  # kill control
+        return ret
 
     def showGraph(self):
+        """
+            Dumps out the node graph
+        """
         print(GraphVisualizer().generate_dot_output(self))
         return None
 
-    """Parses an expression statement
-        name '=' expression ';'
-    """
     def parseExpressionStatement(self):
+        """ Parses an expression statement
+            name '=' expression ';'
+        """
         name = self.requireId()
         self.require(syntax="=")
         expr = self.require(self.parseExpression(), ";")
@@ -74,6 +110,10 @@ class Parser():
         return expr
 
     def parseDecl(self):
+        """ Parses a declStatement
+            'int' name = expression ';'
+        """
+        # Type is `int` for now.
         name = self.requireId()
         self.require(syntax="=")
         expr = self.require(self.parseExpression(), ";")
@@ -81,41 +121,54 @@ class Parser():
             self.error(f"Redefining name '{name}'")
         return expr
 
-    """
-        expr : additiveExpr
-    """
     def parseExpression(self):
-        return self.parseAddition()
+        """ Parse an expression of the form:
+            expr : compareExpr
+        """
+        return self.parseComparison()
 
-    """
-        additiveExpr : multiplicativeExpr (('+' | '-') multiplicativeExpr)*
-    """
+    def parseComparison(self):
+        """ Parse an expression of the form:
+            compareExpr : additiveExpr op additiveExpr
+        """
+        lhs = self.parseAddition()
+        if self.match("=="): return EQ(lhs, self.parseComparison()).peephole()
+        if self.match("!="): return NotNode(EQ(lhs, self.parseComparison()).peephole()).peephole()
+        if self.match("<"): return LT(lhs, self.parseComparison()).peephole()
+        if self.match("<="): return LE(lhs, self.parseComparison()).peephole()
+        if self.match(">"): return LE(self.parseComparison(), lhs).peephole()
+        if self.match(">="): return LE(self.parseComparison(), lhs).peephole()
+        return lhs
+
     def parseAddition(self):
+        """ Parse an additive expression
+            additiveExpr : multiplicativeExpr (('+' | '-') multiplicativeExpr)*
+        """
         lhs = self.parseMultiplication()
         if self.match("+"): return AddNode(lhs, self.parseAddition()).peephole()
         if self.match("-"): return SubNode(lhs, self.parseAddition()).peephole()
         return lhs
 
-    """
-        multiplicativeExpr : unaryExpr (('*' | '/') unaryExpr)*
-    """
     def parseMultiplication(self):
+        """
+            multiplicativeExpr : unaryExpr (('*' | '/') unaryExpr)*
+        """
         lhs = self.parseUnary()
         if self.match("*"): return MulNode(lhs, self.parseMultiplication()).peephole()
         if self.match("/"): return DivNode(lhs, self.parseMultiplication()).peephole()
         return lhs
 
-    """
-        unaryExpr : ('-') unaryExpr | primaryExpr
-    """
     def parseUnary(self):
+        """
+            unaryExpr : ('-') unaryExpr | primaryExpr
+        """
         if self.match("-"): return MinusNode(self.parseUnary()).peephole()
         return self.parsePrimary()
 
-    """
-        primaryExpr : integerLiteral | Identifier | '(' expression ')'
-    """
     def parsePrimary(self):
+        """
+            primaryExpr : integerLiteral | Identifier | '(' expression ')'
+        """
         if self._lexer.isNumber():
             return self.parseIntegerLiteral()
         if self.match("("): return self.require(self.parseExpression(), ")")
@@ -125,13 +178,13 @@ class Parser():
         if n is not None: return n
         self.error(f"Undefined name '{name}'")
 
-    """
-        integerLiteral: [1-9][0-9]* | [0]
-    """
     def parseIntegerLiteral(self) -> ConstantNode:
+        """
+            integerLiteral: [1-9][0-9]* | [0]
+        """
         return ConstantNode(self._lexer.parseNumber()).peephole()
 
-    #-------------------------#
+    #----------------------------------#
     # Utilities for lexical analysis
 
     def match(self, syntax: str):
@@ -167,12 +220,12 @@ class Parser():
             return n
         self.errorSyntax(syntax)
 
+    def errorSyntax(self, syntax):
+        return self.error(f"Syntax error, expected {syntax}: {self._lexer.getAnyNextToken()}")
+    
     @staticmethod
     def error(errorMessage):
         raise RuntimeError(errorMessage)
-
-    def errorSyntax(self, syntax):
-        return self.error(f"Syntax error, expected {syntax}: {self._lexer.getAnyNextToken()}")
 
     #---------------------------------#
     # Lexer Components

@@ -1,11 +1,11 @@
 from abc import abstractmethod
 from typing_extensions import override
-from myparser.type import Type, BOTTOM
+from myparser.type import Type, TypeTuple, BOTTOM
 from myparser.utils import BitVector
 
 class Node():
     _unique_id = 1
-    _disablePeephole = False
+    _disablePeephole = False # allow disabling peephole so that we can observe the full graph.
     def __init__(self, *args): # node can have zero or multi inputs.
         self._nid = Node._unique_id
         Node._unique_id += 1
@@ -15,7 +15,7 @@ class Node():
 
         for _input in self._inputs:
             if _input is not None:
-                _input._outputs.append(self)
+                _input.add_use(self)
     def label(self) -> str:
         pass
 
@@ -58,18 +58,6 @@ class Node():
 
     def isCFG(self) -> bool:
         return False
-
-    def peephole(self):
-        type_ = self._type = self.compute()
-        if Node._disablePeephole:
-            return self
-        if not isinstance(self, ConstantNode) and type_.is_constant():
-            self.kill()
-            return ConstantNode(type_).peephole()
-        n = self.idealize()
-        if n is not None:
-            return n
-        return self
 
     def set_def(self, idx: int, new_def):
         """
@@ -132,13 +120,119 @@ class Node():
     def is_dead(self):
         return self.isUnused() and self.nIns() == 0 and self._type == None
 
+    def keep(self):
+        """
+            Add bogus null use to keep node alive.
+            Shortcuts to stop DCE(Dead Code Elimination) mid-parse.
+        """
+        return self.add_use(None)
+    
+    def unkeep(self):
+        """
+            Remove bogus null.
+        """
+        self.del_use(None)
+        return self
+    
+    # --------------------------------------
+    # Graph-based optimizations
+    def peephole(self):
+        # compute initial or improved Type
+        type_ = self._type = self.compute()
+
+        if Node._disablePeephole: # without peephole
+            return self
+        
+        # Replace constant computations from non-constants with a constant node
+        if not isinstance(self, ConstantNode) and type_.is_constant():
+            return self.deadCodeElim(ConstantNode(type_).peephole())
+        
+        # Future chapter: Global Value Numbering
+
+        # Ask each node for a better replacement
+        n = self.idealize()
+        if n is not None:  # something changed
+            # Recursively optimize
+            return self.deadCodeElim(n.peephole())
+        return self        # No progress
+
+    def deadCodeElim(self, m):
+        """
+            m is the new Node, self is the old.
+            Return 'm', which may have zero use but is alive nonetheless.
+            If self has zero use (and is not 'm'), kill self.
+        """
+        if m is not self and self.isUnused():
+            # Killing self - and this may recursively kill self's inputs
+            # which might end up killing m, so we add a bogus extra null output
+            # edge to stop kill().
+            m.keep()
+            self.kill()
+            m.unkeep()
+        return m
+
     @abstractmethod
     def compute(self):
+        """
+            This function needs to be
+            <a href="https://en.wikipedia.org/wiki/Monotonic_function">Monotonic</a>
+            as it is part of a Monotone Analysis Framework.
+            <a href="https://www.cse.psu.edu/~gxt29/teaching/cse597s21/slides/08monotoneFramework.pdf">See for example this set of slides</a>.
+            
+            For Chapter 2, all our Types are really integer constants, and so all
+            the needed properties are trivially true, and we can ignore the high
+            theory.  Much later on, this will become important and allow us to do
+            many fancy complex optimizations trivially... because theory.
+            
+            compute() needs to be stand-alone, and cannot recursively call compute
+            on its inputs programs are cyclic (have loops!) and this will just
+            infinitely recurse until stack overflow.  Instead, compute typically
+            computes a new type from the `_type` field of its inputs.
+        """
         pass
 
     @abstractmethod
     def idealize(self):
+        """
+            This function rewrites the current Node into a more "idealized" form.
+            This is the bulk of our peephole rewrite rules, and we use this to
+            e.g. turn arbitrary collections of adds and multiplies with mixed
+            constants into a normal form that's easy for hardware to implement.
+            Example: An array addressing expression:
+                ary[idx+1]
+            might turn into Sea-of-Nodes IR:
+                (ary+12)+((idx+1) * 4)
+            This expression can then be idealized into:
+                ary + ((idx*4) + (12 + (1*4)))
+            And more folding:
+                ary + ((idx<<2) + 16)
+            And during code-gen:
+                MOV4 Rary,Ridx,16 // or some such hardware-specific notation
+            
+            `idealize` has a very specific calling convention:
+            - If NO change is made, return `null`
+            - If ANY change is made, return not-null; this can be `self`
+            - The returned Node does NOT call `peephole` on itself; the `peephole` call will recursively peephole it.
+            - Any NEW nodes that are not directly returned DO call `peephole`.
+
+            Since idealize calls peephole and peephole calls idealize, you must be
+            careful that all idealizations are *monotonic*: all transforms remove
+            some feature, so that the set of available transforms always shrinks.
+            If you don't, you risk an infinite peephole loop!
+            
+            @return Either a new or changed node, or null for no changes.
+        """
         pass
+
+    # ------------------------------
+    # Peephole utilities
+
+    # swap inputs without letting either input go dead during the swap.
+    def swap12(self):
+        tmp = self.In(1)
+        self._inputs[1] = self.In(2)
+        self._inputs[2] = tmp
+        return self
 
     @classmethod
     def reset(cls):
@@ -195,29 +289,6 @@ class ConstantNode(Node):
     def idealize(self):
         return None
 
-class StartNode(Node):
-    def __init__(self):
-        super().__init__()
-
-    @override
-    def label(self) -> str:
-        return "Start"
-
-    @override
-    def _print1(self, s: str):
-        return s + self.label()
-
-    def isCFG(self) -> bool:
-        return True;
-
-    @override
-    def compute(self):
-        return BOTTOM
-
-    @override
-    def idealize(self):
-        return None
-
 class ReturnNode(Node):
     def __init__(self, ctrl, data):
         super().__init__(ctrl, data)
@@ -241,7 +312,36 @@ class ReturnNode(Node):
 
     @override
     def compute(self):
-        return BOTTOM
+        return TypeTuple([self.ctrl()._type, self.expr()._type])
+
+    @override
+    def idealize(self):
+        return None
+
+class MultiNode(Node):
+    def __init__(self, *args):
+        super().__init__(*args)
+
+class StartNode(MultiNode):
+    def __init__(self, variables):
+        super().__init__()
+        self._args = TypeTuple(variables)
+        self._type = self._args
+
+    @override
+    def label(self) -> str:
+        return "Start"
+
+    @override
+    def _print1(self, s: str):
+        return s + self.label()
+
+    def isCFG(self) -> bool:
+        return True
+
+    @override
+    def compute(self):
+        return self._args
 
     @override
     def idealize(self):

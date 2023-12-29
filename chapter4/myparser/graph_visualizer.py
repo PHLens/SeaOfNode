@@ -12,7 +12,7 @@ class GraphVisualizer:
     def generate_dot_output(self, parser) -> str:
         # graph may have cycles, get all nodes in graph first.
         all = self.find_all(parser)
-        s = "digraph chapter03 {\n"
+        s = "digraph chapter04 {\n"
         s += "/*\n"
         s += parser.src()
         s += "\n*/\n"

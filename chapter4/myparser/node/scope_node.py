@@ -7,6 +7,8 @@ class ScopeNode(Node):
         The Scope node is purely a parser helper
         - it tracks names to nodes with a stack of scopes.
     """
+    CTRL = "$ctrl"
+    ARG0 = "arg"
     def __init__(self):
         super().__init__()
         self._scopes = []
@@ -93,8 +95,8 @@ class ScopeNode(Node):
         # if node is None, we are doing lookup rather than update, hence return existing value
         return old if node == None else self.set_def(idx, node)
 
-    def crtl(self):
+    def ctrl(self):
         return self.In(0)
     
-    def crtl(self, n: Node):
+    def ctrln(self, n):
         return self.set_def(0, n)
