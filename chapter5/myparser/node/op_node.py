@@ -1,4 +1,5 @@
 from .node import Node, ConstantNode
+from .phi_node import PhiNode
 from typing_extensions import override
 from myparser.type import Type, TypeInteger, BOTTOM, ZERO
 
@@ -72,6 +73,23 @@ class AddNode(Node):
         if lhs.In(2)._type.is_constant() and t2.is_constant():
             return AddNode(lhs.In(1), AddNode(lhs.In(2), rhs).peephole())
 
+        # Do we have ((x+(phi cons)) + con) ?
+        # Push constant up through the phi: x + (phi con0+con con1+con...)
+        # Do we have ((x+(phi cons)) + (phi cons)) ?
+        # Push constant up through the phi: x + (phi con0+con0 con1+con1...)
+        phi = lhs.In(2)
+        if isinstance(phi, PhiNode) and phi.allCons() \
+            and (t2.is_constant() or (isinstance(rhs, PhiNode) and phi.In(0) == rhs.In(0) and rhs.allCons())):
+            ns = [Node() for i in range(phi.nIns())]
+            ns[0] = phi.In(0)
+            # Push constant through the phi: x + (phi con0+con con1+con...)
+            # or phi: x + (phi con0+con0 con1+con1...)
+            for i in range(1, phi.nIns()):
+                ns[i] = AddNode(phi.In(i), rhs if t2.is_constant() else rhs.In(i)).peephole()
+            label = phi._label + rhs._label if isinstance(rhs, PhiNode) else ""
+            return AddNode(lhs.In(1), PhiNode(label, *ns).peephole())   # we don't get in an endless peephole cycle here
+                                                                        # because the constants all fold first.
+
         # Now we sort along the spline via rotates, to gather similar things together.
 
         # rotate `(x+y)+z` to `(x+z)+y`
@@ -85,15 +103,26 @@ class AddNode(Node):
             Compare two off-spline nodes and decide what order they should be in.
             Do we rotate ((x + hi) + lo) into ((x + lo) + hi) ?
 
-            Generally constants always go right, then others.
+            Generally constants always go right, then Phi-of-constants, then muls, then others.
             Ties with in a category sort by node ID.
             `True` if swapping hi and lo.
         """
         if lo._type.is_constant(): return False
         if hi._type.is_constant(): return True
 
+        if isinstance(lo, PhiNode) and lo.allCons(): return False
+        if isinstance(hi, PhiNode) and hi.allCons(): return True
+
+        if isinstance(lo, PhiNode) and not isinstance(hi, PhiNode): return True
+        if isinstance(hi, PhiNode) and not isinstance(lo, PhiNode): return False
+
         # Same category of "others"
         return lo._nid > hi._nid
+
+    @override
+    def copy(self, lhs, rhs):
+        return AddNode(lhs, rhs)
+        
 
 class SubNode(Node):
     def __init__(self, lhs, rhs):
@@ -109,8 +138,8 @@ class SubNode(Node):
 
     @override
     def _print1(self, s: str):
-        self.In(1)._print0(s + "(")
-        self.In(2)._print0(s + "-")
+        s = self.In(1)._print0(s + "(")
+        s = self.In(2)._print0(s + "-")
         s += ")"
         return s
 
@@ -127,6 +156,10 @@ class SubNode(Node):
     @override
     def idealize(self):
         return None
+    
+    @override
+    def copy(self, lhs, rhs):
+        return SubNode(lhs, rhs)
 
 class MinusNode(Node):
     def __init__(self, input_):
@@ -201,6 +234,10 @@ class MulNode(Node):
             return self.swap12()
 
         return None
+    
+    @override
+    def copy(self, lhs, rhs):
+        return MulNode(lhs, rhs)
 
 class DivNode(Node):
     def __init__(self, lhs, rhs):
@@ -233,6 +270,10 @@ class DivNode(Node):
     @override
     def idealize(self):
         return None
+
+    @override
+    def copy(self, lhs, rhs):
+        return DivNode(lhs, rhs)
 
 class NotNode(Node):
     def __init__(self, in_):

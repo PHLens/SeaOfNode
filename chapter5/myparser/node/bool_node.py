@@ -60,6 +60,9 @@ class EQ(BoolNode):
     def doOp(self, lhs, rhs):
         return lhs == rhs
     
+    def copy(self, lhs, rhs):
+        return EQ(lhs, rhs)
+    
 
 class LT(BoolNode):
     def __init__(self, lhs, rhs):
@@ -73,6 +76,8 @@ class LT(BoolNode):
     def doOp(self, lhs, rhs):
         return lhs < rhs
     
+    def copy(self, lhs, rhs):
+        return LT(lhs, rhs)
 
 class LE(BoolNode):
     def __init__(self, lhs, rhs):
@@ -85,3 +90,6 @@ class LE(BoolNode):
     @override
     def doOp(self, lhs, rhs):
         return lhs <= rhs
+    
+    def copy(self, lhs, rhs):
+        return LE(lhs, rhs)

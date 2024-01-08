@@ -1,14 +1,9 @@
-from .node import ConstantNode, StartNode, ScopeNode, ProjNode, MultiNode
+from myparser.node import ConstantNode, ScopeNode, ProjNode, MultiNode, PhiNode, RegionNode
 class GraphVisualizer:
     """Simple visualizer that outputs GraphViz dot format.
        The dot output must be saved to a file and run manually via dot to generate the SVG output.
        Currently, this is done manually.
     """
-    all_nodes = {}
-    def __init__(self) -> None:
-        super().__init__()
-        GraphVisualizer.all_nodes.clear()
-
     def generate_dot_output(self, parser) -> str:
         # graph may have cycles, get all nodes in graph first.
         all = self.find_all(parser)
@@ -17,7 +12,12 @@ class GraphVisualizer:
         s += parser.src()
         s += "\n*/\n"
 
-        s += "\trankdir=BT;\n"
+        # To keep the Scopes below the graph and pointing up into the graph we
+        # need to group the Nodes in a subgraph cluster, and the scopes into a
+        # different subgraph cluster.  THEN we can draw edges between the
+        # scopes and nodes.  If we try to cross subgraph cluster borders while
+        # still making the subgraphs DOT gets confused.
+        s += "\trankdir=BT;\n"  # Force Nodes before Scopes
 
         # Preserve node input order
         s += "\tordering=\"in\";\n"
@@ -26,17 +26,19 @@ class GraphVisualizer:
         # nodes much prettier to look at.
         s += "\tconcentrate=\"true\";\n"
 
-        # nodes in a cluster, no edges.
+        # nodes first in a cluster, no edges.
         s = self.nodes(s, all)
 
-        # scopes in another cluster, no edges.
-        s = self.scopes(s, parser._scope)
+        # Now scopes in a cluster, no edges.
+        for sn in parser.xScopes:
+            s = self.scopes(s, sn)
 
         # Walk node edges.
         s = self.node_edges(s, all)
 
         # Walk scope edges
-        s = self.scope_edges(s, parser._scope)
+        for sn in parser.xScopes:
+            s = self.scope_edges(s, sn)
 
         s += "}\n"
         return s
@@ -72,11 +74,26 @@ class GraphVisualizer:
                 s += "</TR>\n"
                 s += "\t\t\t</TABLE>>\n\t\t"
             else:
+                # control nodes have box shape
+                # other nodes are ellipses, i.e. default shape
                 if node.isCFG():
                     s += "shape=box style=filled fillcolor=yellow "
+                if isinstance(node, PhiNode):
+                    s += "style=filled fillcolor=lightyellow "
                 s += f"label=\"{lab}\""
             s += "];\n"
-        s += "\t}\n"
+
+        # force Region & Phis to line up
+        for n in all:
+            if isinstance(n, RegionNode):
+                s += "\t\t{ rank=same; "
+                s += f"{node.unique_name()};"
+                for phi in node._outputs:
+                    if isinstance(phi, PhiNode):
+                        s += f"{phi.unique_name()};"
+                s += "}\n"
+
+        s += "\t}\n" # End node cluster
         return s
 
     def scopes(self, s, scopenode):
@@ -115,7 +132,13 @@ class GraphVisualizer:
                 continue
             i = 0
             for def_ in node._inputs:
-                if def_ is not None:
+                if isinstance(node, PhiNode) and isinstance(def_, RegionNode):
+                    # Draw a dotted use->def edge from Phi to Region
+                    s += f"\t{node.unique_name()}"
+                    s += f" -> {def_.unique_name()}"
+                    s += f" [style=dotted taillabel={i}];\n"
+                elif def_ is not None:
+                    # Most edges land here use->def
                     s += f"\t{node.unique_name()} -> "
                     if isinstance(def_, ProjNode):
                         mname = def_.ctrl().unique_name()
@@ -124,9 +147,7 @@ class GraphVisualizer:
                         s += f"{def_.unique_name()}"
                     # number edges
                     s += f"[taillabel={i}"
-                    if isinstance(node, ConstantNode) and isinstance(def_, StartNode):
-                        s += " style=dotted"
-                    elif def_.isCFG():
+                    if def_.isCFG():
                         s += " color=red"
                     s += "];\n"
                 i +=1
@@ -156,9 +177,15 @@ class GraphVisualizer:
         all_nodes = {}
         for n in start._outputs:
             self.walk(n, all_nodes)
+
+        # scan symbol tables
+        for scope in parser._scope._scopes:
+            for i in scope.values():
+                self.walk(parser._scope.In(i), all_nodes)
         return all_nodes.values()
 
     def walk(self, node, all_nodes):
+        if node is None: return
         if all_nodes.get(node._nid) is not None:
             return
         all_nodes[node._nid] = node

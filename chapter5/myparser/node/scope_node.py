@@ -1,4 +1,6 @@
 from .node import Node
+from .region_node import RegionNode
+from .phi_node import PhiNode
 from typing_extensions import override
 from myparser.type import BOTTOM
 
@@ -34,7 +36,7 @@ class ScopeNode(Node):
                     s += "null"
                 else:
                     s = n._print0(s)
-                s += "]"
+            s += "]"
         return s
 
     def reverse_names(self):
@@ -99,4 +101,53 @@ class ScopeNode(Node):
         return self.In(0)
     
     def ctrln(self, n):
+        """
+            The ctrl of a ScopeNode is always bound to the currently active
+            control node in the graph, via a special name '$ctrl' that is not
+            a valid identifier in the language grammar and hence cannot be
+            referenced in Simple code.
+
+            @param n The node to be bound to '$ctrl'
+
+            @return Node that was bound
+        """
         return self.set_def(0, n)
+    
+    def dup(self):
+        """
+            Duplicate a ScopeNode; including all levels, up to Nodes.  So this is
+            neither shallow (would dup the Scope but not the internal HashMap
+            tables), nor deep (would dup the Scope, the HashMap tables, but then
+            also the program Nodes).
+            
+            The new Scope is a full-fledged Node with proper use<->def edges.
+        """
+        dup = ScopeNode()
+        # Our goals are:
+        # 1) duplicate the name bindings of the ScopeNode across all stack levels
+        # 2) Make the new ScopeNode a user of all the nodes bound
+        # 3) Ensure that the order of defs is the same to allow easy merging
+        for syms in self._scopes:
+            dup._scopes.append(syms)
+        dup.add_def(self.ctrl())
+        for i in range(1, self.nIns()):
+            dup.add_def(self.In(i))
+        return dup
+    
+    def merge_scopes(self, that):
+        """
+            Merges the names whose node bindings differ, by creating Phi node for such names
+            The names could occur at all stack levels, but a given name can only differ in the
+            innermost stack level where the name is bound.
+
+            @param that The ScopeNode to be merged into this
+            @return A new node representing the merge point
+        """
+        r = self.ctrln(RegionNode(None, self.ctrl(), that.ctrl()).peephole())
+        ns = self.reverse_names()
+        # Note that we skip i==0, which is bound to '$ctrl'
+        for i in range(1, self.nIns()):
+            if self.In(i) != that.In(i): # No need for redundant Phis
+                self.set_def(i, PhiNode(ns[i], r, self.In(i), that.In(i)).peephole())
+        that.kill()   # kill merged scope
+        return r

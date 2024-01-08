@@ -109,8 +109,8 @@ class SubNode(Node):
 
     @override
     def _print1(self, s: str):
-        self.In(1)._print0(s + "(")
-        self.In(2)._print0(s + "-")
+        s = self.In(1)._print0(s + "(")
+        s = self.In(2)._print0(s + "-")
         s += ")"
         return s
 
