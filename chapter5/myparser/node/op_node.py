@@ -72,6 +72,12 @@ class AddNode(Node):
         if lhs.In(2)._type.is_constant() and t2.is_constant():
             return AddNode(lhs.In(1), AddNode(lhs.In(2), rhs).peephole())
 
+        # Do we have ((x+(phi cons)) + con) ?
+        # Do we have ((x+(phi cons)) + (phi cons)) ?
+        # Push constant up through the phi: x + (phi con0+con0 con1+con1...)
+        # TODO: implement PhiNode
+        #if isinstance(lhs.In(2), PhiNode)
+
         # Now we sort along the spline via rotates, to gather similar things together.
 
         # rotate `(x+y)+z` to `(x+z)+y`
@@ -94,6 +100,11 @@ class AddNode(Node):
 
         # Same category of "others"
         return lo._nid > hi._nid
+
+    @override
+    def copy(self, lhs, rhs):
+        return AddNode(lhs, rhs)
+        
 
 class SubNode(Node):
     def __init__(self, lhs, rhs):
@@ -127,6 +138,10 @@ class SubNode(Node):
     @override
     def idealize(self):
         return None
+    
+    @override
+    def copy(self, lhs, rhs):
+        return SubNode(lhs, rhs)
 
 class MinusNode(Node):
     def __init__(self, input_):
@@ -201,6 +216,10 @@ class MulNode(Node):
             return self.swap12()
 
         return None
+    
+    @override
+    def copy(self, lhs, rhs):
+        return MulNode(lhs, rhs)
 
 class DivNode(Node):
     def __init__(self, lhs, rhs):
@@ -233,6 +252,10 @@ class DivNode(Node):
     @override
     def idealize(self):
         return None
+
+    @override
+    def copy(self, lhs, rhs):
+        return DivNode(lhs, rhs)
 
 class NotNode(Node):
     def __init__(self, in_):

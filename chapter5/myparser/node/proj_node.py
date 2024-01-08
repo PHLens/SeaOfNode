@@ -1,4 +1,4 @@
-from .node import Node, MultiNode
+from myparser.node import Node, MultiNode, IfNode
 from typing_extensions import override
 from myparser.type import TypeTuple, BOTTOM
 
@@ -18,7 +18,7 @@ class ProjNode(Node):
 
     @override
     def isCFG(self) -> bool:
-        return self._idx == 0
+        return self._idx == 0 or isinstance(self.ctrl(), IfNode)
     
     def ctrl(self) -> MultiNode:
         return self.In(0)

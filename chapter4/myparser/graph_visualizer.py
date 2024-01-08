@@ -156,9 +156,15 @@ class GraphVisualizer:
         all_nodes = {}
         for n in start._outputs:
             self.walk(n, all_nodes)
+        
+        # scan symbol tables
+        for scope in parser._scope._scopes:
+            for i in scope.values():
+                self.walk(parser._scope.In(i), all_nodes)
         return all_nodes.values()
 
     def walk(self, node, all_nodes):
+        if node is None: return
         if all_nodes.get(node._nid) is not None:
             return
         all_nodes[node._nid] = node

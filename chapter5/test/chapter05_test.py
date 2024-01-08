@@ -9,6 +9,21 @@ from myparser.node import Node, ConstantNode, ProjNode
 from myparser.type import TypeInteger, BOT
 
 class TestParser(unittest.TestCase):
+    def test_chapter5_ifstmt(self):
+        parser = Parser(
+        """
+        int a = 1;
+        if (arg == 1)
+            a = arg+2;
+        else {
+            a = arg-3;
+            #showGraph;
+        }
+        #showGraph;
+        return a;""")
+        ret = parser.parse(True)
+        self.assertEquals("return Phi(Region17,(arg+2),(arg-3));", ret)
+
     def test_chapter4_peephole(self):
         parser = Parser("return 1+arg+2; #showGraph;")
         ret = parser.parse()
@@ -41,7 +56,8 @@ class TestParser(unittest.TestCase):
     
     def test_chapter4_var_arg(self):
         parser = Parser("return arg; #showGraph;", BOT)
-        ret = parser.parse()
+        stop = parser.parse()
+        ret = stop.In(0)
         self.assertTrue(isinstance(ret.In(0), ProjNode))
         self.assertTrue(isinstance(ret.In(1), ProjNode))
 
@@ -91,46 +107,46 @@ class TestParser(unittest.TestCase):
         ret = parser.parse()
         self.assertEqual("return (-arg);", ret.print())
 
-    def test_var_decl(self):
+    def test_chapter3_var_decl(self):
         parser = Parser("int a=1; return a;")
         ret = parser.parse()
         self.assertEqual("return 1;", ret.print())
 
-    def test_var_add(self):
+    def test_chapter3_var_add(self):
         parser = Parser("int a=1; int b=2; return a+b;")
         ret = parser.parse()
         self.assertEqual("return 3;", ret.print())
 
-    def test_var_scope(self):
+    def test_chapter3_var_scope(self):
         parser = Parser("int a=1; int b=2; int c=0; { int b=3; c=a+b; } return c;")
         ret = parser.parse()
         self.assertEqual("return 4;", ret.print())
 
-    def test_var_scope_nopeephole(self):
+    def test_chapter3_var_scope_nopeephole(self):
         parser = Parser("int a=1; int b=2; int c=0; { int b=3; c=a+b; #showGraph; } return c; #showGraph;")
         Node._disablePeephole = True
         ret = parser.parse()
         Node._disablePeephole = False
         self.assertEqual("return (1+3);", ret.print())
 
-    def test_var_dist(self):
+    def test_chapter3_var_dist(self):
         parser = Parser("int x0=1; int y0=2; int x1=3; int y1=4; return (x0-x1)*(x0-x1) + (y0-y1)*(y0-y1); #showGraph;")
         ret = parser.parse()
         self.assertEqual("return 8;", ret.print())
 
-    def test_self_assign(self):
+    def test_chapter3_self_assign(self):
         parser = Parser("int a=a; return a;")
         refmsg = "Undefined name 'a'"
         with self.assertRaisesRegex(RuntimeError, refmsg):
             ret = parser.parse()
 
     def test_chapter2_parser_grammar(self):
-        parser = Parser("return 1+2*3+-5;")
+        parser = Parser("return 1+2*3+-5; #showGraph;")
         Node._disablePeephole = True
         ret = parser.parse()
         self.assertEqual("return (1+((2*3)+(-5)));", ret.print())
-        gv = GraphVisualizer()
-        print(gv.generate_dot_output(parser))
+        #gv = GraphVisualizer()
+        #print(gv.generate_dot_output(parser))
         Node._disablePeephole = False
 
     def test_chapter2_add_peephole(self):
@@ -165,8 +181,9 @@ class TestParser(unittest.TestCase):
 
     def test_simple_program(self):
         parser = Parser("return 1;")
-        ret = parser.parse()
+        stop = parser.parse()
         start = parser.START
+        ret = stop.In(0)
 
         self.assertTrue(isinstance(ret.ctrl(), ProjNode))
         expr = ret.expr()
