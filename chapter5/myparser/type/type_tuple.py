@@ -1,4 +1,4 @@
-from .type import Type
+from .type import Type, CONTROL
 from typing_extensions import override
 
 class TypeTuple(Type):
@@ -18,3 +18,5 @@ class TypeTuple(Type):
             s += ","
         s += "]"
         return s
+
+IF = TypeTuple([CONTROL, CONTROL])

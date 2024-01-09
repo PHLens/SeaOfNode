@@ -234,6 +234,19 @@ class Node():
         self._inputs[2] = tmp
         return self
 
+    def allCons(self):
+        """
+            does this node contain all constants?
+            Ignore In(0), as is usually control
+        """
+        for i in range(1, self.nIns()):
+            if not self.In(i)._type.is_constant():
+                return False
+        return True
+
+    def copy(self, lhs, rhs):
+        raise NotImplementedError("Binary ops need to implement copy")
+
     @classmethod
     def reset(cls):
         cls._unique_id = 1
@@ -308,7 +321,7 @@ class ReturnNode(Node):
         return self.expr()._print0(s + "return ") + ";"
 
     def isCFG(self) -> bool:
-        return True;
+        return True
 
     @override
     def compute(self):
@@ -346,3 +359,42 @@ class StartNode(MultiNode):
     @override
     def idealize(self):
         return None
+
+class StopNode(Node):
+    def __init__(self, *inputs):
+        super().__init__(*inputs)
+
+    @override
+    def label(self) -> str:
+        return "Stop"
+    
+    @override
+    def _print1(self, s: str):
+        if self.ret() is not None: return s + self.ret()._print0(s)
+        s += "Stop[ "
+        for ret in self._inputs:
+            s = ret._print0(s)
+            s += " "
+        return s + "]"
+    
+    @override
+    def isCFG(self) -> bool:
+        return True
+    
+    def ret(self):
+        """
+            If a single Return, return it.
+            Otherwise, null because ambiguous.
+        """
+        return self.In(0) if self.nIns() == 1 else None
+    
+    @override
+    def compute(self):
+        return BOTTOM
+    
+    @override
+    def idealize(self):
+        return None
+
+    def add_return(self, node):
+        return self.add_def(node)

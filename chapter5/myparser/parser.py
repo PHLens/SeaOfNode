@@ -13,15 +13,18 @@ class Parser():
     # class variable for static use.
     START = None
     # List of keywords disallowed as identifiers.
-    KEYWORDS = ["int", "return"]
+    KEYWORDS = ["else", "false", "if", "int", "return", "true"]
     def __init__(self, source: str, arg=None):
         if arg is None:
             arg = BOT
         Node.reset()
         self._lexer = self.Lexer(source)
         self._scope = ScopeNode()
+        # We clone ScopeNodes when control flows branch; it is useful to have
+        # a list of all active ScopeNodes for purposes of visualization of the SoN graph
+        self.xScopes = []
         Parser.START = StartNode([CONTROL, arg])
-        Parser.START.peephole()
+        Parser.STOP = StopNode()
 
     def __repr__(self):
         return self._lexer.__repr__()
@@ -42,58 +45,109 @@ class Parser():
         return self._scope.ctrln(n)
 
     def parse(self, show=False) -> ReturnNode:
+        self.xScopes.append(self._scope)
         # Enter a new scope for the initial control and arguments
         self._scope.push()
         self._scope.define(ScopeNode.CTRL, ProjNode(Parser.START, 0, ScopeNode.CTRL).peephole())
         self._scope.define(ScopeNode.ARG0, ProjNode(Parser.START, 1, ScopeNode.ARG0).peephole())
-        ret = self.parseBlock()
+        self.parseBlock()
         self._scope.pop()
+        self.xScopes.pop()
         if not self._lexer.is_eof():
             self.error(f"Syntax error, unexpected {self._lexer.getAnyNextToken()}")
+        Parser.STOP.peephole()
         if show:
             self.showGraph()
-        return ret
+        return Parser.STOP
 
     def parseBlock(self):
         """ Block
             '{' statement '}'
             Does not parse the opening or closing '{}'
+
+            @return a `Node` or `None`
         """
         # Enter a new scope
         self._scope.push()
-        n = None
         while not self.peek('}') and not self._lexer.is_eof():
-            n0 = self.parseStatement()
-            if n0 is not None:
-                n = n0
+            self.parseStatement()
         # Exit scope
         self._scope.pop()
-        return n
+        return None
 
     def parseStatement(self):
         """ Parses a statement:
             returnStatement | declStatement | blockStatement | expressionStatement
+
+            @return a `Node` or `None`
         """
         if self.matchx("return"): return self.parseReturn()
         elif self.matchx("int"): return self.parseDecl()
         elif self.match("{"): return self.require(self.parseBlock(), "}")
+        elif self.matchx("if"): return self.parseIf()
         elif self.matchx("#showGraph"): return self.require(self.showGraph(), ";")
         else: return self.parseExpressionStatement()
+
+    def parseIf(self):
+        """
+            if ( expression ) statement [else statement]
+
+            @return a `Node`, never `None`
+        """
+        self.require(syntax="(")
+        # parse predicate
+        pred = self.require(self.parseExpression(), ")")
+        # IfNode takes current control and predicate
+        if_node = IfNode(self.ctrl(), pred).peephole()
+
+        # setup ProjNodes
+        ifT = ProjNode(if_node, 0, "True").peephole()
+        ifF = ProjNode(if_node, 1, "False").peephole()
+
+        # In if true branch, the ifT proj node becomes the ctrl
+        # But first clone the scope and set it as current
+        ndefs = self._scope.nIns()
+        f_scope = self._scope.dup() # Duplicate current scope
+        self.xScopes.append(f_scope) # For graph visualization
+
+        # Parse the true side
+        self.ctrln(ifT)
+        self.parseStatement()
+        t_scope = self._scope
+
+        # Parse the false side
+        self._scope = f_scope
+        self.ctrln(ifF)
+        if self.matchx("else"):
+            self.parseStatement()
+            f_scope = self._scope
+
+        if t_scope.nIns() != ndefs or f_scope.nIns() != ndefs:
+            return self.error("Cannot define a new name on one arm of an if")
+
+        # Merge results
+        self._scope = t_scope
+        self.xScopes.pop()
+        return self.ctrln(t_scope.merge_scopes(f_scope))
 
     def parseReturn(self) -> ReturnNode:
         """ Parses a return statement; "return" already parsed.
             The $ctrl edge is killed
 
             'return' expr ;
+
+            @return an expression `Node`, never `None`
         """
         expr = self.require(self.parseExpression(), ";")
-        ret = ReturnNode(self.ctrl(), expr).peephole()
+        ret = Parser.STOP.add_return(ReturnNode(self.ctrl(), expr).peephole())
         self.ctrln(None)  # kill control
         return ret
 
     def showGraph(self):
         """
             Dumps out the node graph
+
+            @return `None`
         """
         with open("graph.dot", 'w') as f:
             f.write(GraphVisualizer().generate_dot_output(self))
@@ -104,6 +158,8 @@ class Parser():
     def parseExpressionStatement(self):
         """ Parses an expression statement
             name '=' expression ';'
+            
+            @return an expression `Node`, never `None`
         """
         name = self.requireId()
         self.require(syntax="=")
@@ -115,6 +171,8 @@ class Parser():
     def parseDecl(self):
         """ Parses a declStatement
             'int' name = expression ';'
+
+            @return an expression `Node`, never `None`
         """
         # Type is `int` for now.
         name = self.requireId()
@@ -127,12 +185,16 @@ class Parser():
     def parseExpression(self):
         """ Parse an expression of the form:
             expr : compareExpr
+
+            @return an expression `Node`, never `None`
         """
         return self.parseComparison()
 
     def parseComparison(self):
         """ Parse an expression of the form:
             compareExpr : additiveExpr op additiveExpr
+
+            @return a comparator expression `Node`, never `None`
         """
         lhs = self.parseAddition()
         if self.match("=="): return EQ(lhs, self.parseComparison()).peephole()
@@ -146,6 +208,8 @@ class Parser():
     def parseAddition(self):
         """ Parse an additive expression
             additiveExpr : multiplicativeExpr (('+' | '-') multiplicativeExpr)*
+
+            @return an add expression `Node`, never `None`
         """
         lhs = self.parseMultiplication()
         if self.match("+"): return AddNode(lhs, self.parseAddition()).peephole()
@@ -155,6 +219,8 @@ class Parser():
     def parseMultiplication(self):
         """
             multiplicativeExpr : unaryExpr (('*' | '/') unaryExpr)*
+
+            @return a multipy expression `Node`, never `None`
         """
         lhs = self.parseUnary()
         if self.match("*"): return MulNode(lhs, self.parseMultiplication()).peephole()
@@ -164,6 +230,8 @@ class Parser():
     def parseUnary(self):
         """
             unaryExpr : ('-') unaryExpr | primaryExpr
+
+            @return a unary expression `Node`, never `None`
         """
         if self.match("-"): return MinusNode(self.parseUnary()).peephole()
         return self.parsePrimary()
@@ -171,10 +239,14 @@ class Parser():
     def parsePrimary(self):
         """
             primaryExpr : integerLiteral | Identifier | '(' expression ')'
+
+            @return a primary `Node`, never `None`
         """
         if self._lexer.isNumber():
             return self.parseIntegerLiteral()
         if self.match("("): return self.require(self.parseExpression(), ")")
+        if self.match("true"): return ConstantNode(TypeInteger.constant(1)).peephole()
+        if self.match("false"): return ConstantNode(TypeInteger.constant(0)).peephole()
         name = self._lexer.matchId()
         if name == None: self.errorSyntax("an identifier or expression")
         n = self._scope.lookup(name)
